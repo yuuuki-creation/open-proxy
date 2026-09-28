@@ -1,0 +1,9 @@
+# protobuf 代码生成：在 master/ 下执行 buf generate。
+# 生成物提交进仓库（src/pb/），CI 重新生成并比对，确认是最新的。
+# 插件 neoeinstein-prost v0.5.0 对应 Cargo.toml 里的 prost 0.14。
+version: v2
+plugins:
+  - remote: buf.build/community/neoeinstein-prost:v0.5.0
+    out: src/pb
+inputs:
+  - directory: ../protocol

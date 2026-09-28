@@ -1,0 +1,193 @@
+# 发布（main 分支 architecture.md「发布、安装与升级」的「打包」）：
+# panel 的提交打标签 v<版本>、agent 的提交打标签 agent-v<版本> 后，推送 v<版本> 标签触发。
+# 编译两种架构的 Agent 并签名 → 编译前端 → 把 Agent 和前端嵌进主控，编译两种架构的静态单文件 →
+# 发布到仓库的 Release，推 Docker 镜像 ghcr.io/<仓库>/op-master。
+#
+# 需要在仓库设置里配（没配时 Agent 不签名：新装可以用，但 Agent 会拒绝用它升级）：
+#   Secrets：AGENT_SIGNING_KEY   Ed25519 私钥（PEM，master/scripts/sign-agent.sh genkey 生成，离线保管）
+#   Variables：AGENT_SIGNING_PUBKEY   对应的公钥（sign-agent.sh pubkey 打印），编译进 Agent
+# 这个文件属于 panel 分支。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  AGENT_TAGS: with_quic,with_utls
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: 版本号
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: 检出 panel（签名脚本）
+        uses: actions/checkout@v5
+
+      - name: 检出同版本的 agent
+        uses: actions/checkout@v5
+        with:
+          ref: agent-${{ github.ref_name }}
+          path: agent-src
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: agent-src/agent/go.mod
+          cache-dependency-path: agent-src/agent/go.sum
+
+      - name: 编译
+        working-directory: agent-src/agent
+        env:
+          PUBKEY: ${{ vars.AGENT_SIGNING_PUBKEY }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build -tags "$AGENT_TAGS" -trimpath \
+            -ldflags "-s -w -X main.version=$VERSION -X main.upgradePublicKey=$PUBKEY" \
+            -o "$GITHUB_WORKSPACE/dist/op-agent-linux-${{ matrix.arch }}" ./cmd/op-agent
+
+      - name: 签名
+        env:
+          KEY: ${{ secrets.AGENT_SIGNING_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::warning::没有配置 AGENT_SIGNING_KEY，Agent 不签名，不能用来升级"
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/key.pem"
+          sh master/scripts/sign-agent.sh sign "$RUNNER_TEMP/key.pem" "dist/op-agent-linux-${{ matrix.arch }}"
+          rm -f "$RUNNER_TEMP/key.pem"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.arch }}
+          path: dist/
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: 编译前端
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: web/dist/
+
+  master:
+    needs: [agent, web]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            target: aarch64-unknown-linux-musl
+    steps:
+      - name: 版本号
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v5
+      - name: 取 Agent 二进制（嵌入主控）
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent-*
+          path: master/agent-dist
+          merge-multiple: true
+      - name: 取前端（嵌入主控）
+        uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: web/dist
+      # 交叉编译静态单文件；版本和测试 VPS 上验证过的相同（debug-runs/panel/R20260927-panel-04）
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: 安装 Rust 和 cargo-zigbuild
+        working-directory: master
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          cargo install --locked cargo-zigbuild@0.23.4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: master
+          key: ${{ matrix.target }}
+      - name: 编译主控
+        working-directory: master
+        env:
+          OP_VERSION: ${{ env.VERSION }}
+        run: |
+          ls -l agent-dist
+          cargo zigbuild --locked --release --target ${{ matrix.target }}
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp target/${{ matrix.target }}/release/op-master "$GITHUB_WORKSPACE/dist/op-master-linux-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: master-${{ matrix.arch }}
+          path: dist/
+
+  publish:
+    needs: master
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: master-*
+          path: dist
+          merge-multiple: true
+      - name: SHA-256
+        run: |
+          cd dist
+          sha256sum op-master-linux-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: 发布 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* $prerelease --title "$GITHUB_REF_NAME" \
+            --notes "主控单文件（内置同版本的 Agent 和面板），部署方法见 master/deploy/README.md。"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: 镜像标签（ghcr 要求小写；预发布版本不打 latest）
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/op-master"
+          tags="$image:$GITHUB_REF_NAME"
+          case "$GITHUB_REF_NAME" in *-*) ;; *) tags="$tags,$image:latest" ;; esac
+          echo "IMAGE_TAGS=$tags" >> "$GITHUB_ENV"
+      - name: 推 Docker 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: master/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE_TAGS }}

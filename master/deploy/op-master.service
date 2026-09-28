@@ -1,0 +1,16 @@
+# op-master 的 systemd 服务（单文件部署）。装法见同目录的 README.md。
+[Unit]
+Description=open-proxy 主控
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/op-master
+Environment=OP_MASTER_DATA_DIR=/var/lib/op-master
+# 恢复备份后主控会主动退出（退出码 75），靠这里重启
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
