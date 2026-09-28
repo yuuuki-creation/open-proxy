@@ -16,7 +16,7 @@
 
 ## 下一步
 
-1. agent 分支修 agent-5（代理用户不能访问服务器本机和内网，设计见 `architecture.md` 同名一节）。代码在 agent-guard（PR 18，草稿），还没在 VPS 上跑验证
+1. agent 分支修 agent-5（代理用户不能访问服务器本机和内网，设计见 `architecture.md` 同名一节）。代码在 agent-guard（还没开 PR），还没在 VPS 上跑验证
 2. panel 分支写集成测试计划（未验证的假设、ACME、各订阅客户端），再补两边的单元测试
 3. 开工中发现设计问题时，回到 main 改设计文档
 
@@ -24,10 +24,11 @@
 
 - 2026-09-27 重装成 Debian 13 后重新初始化完（<VPS_IP>，root）；我们的所有进程在 `open-proxy.slice` 里跑，不碰 Docker
 - 已装：Go 1.26.5、Rust 1.96.0（含两个 musl 目标）、Node v24.14.1 + pnpm 10、zig 0.16.0、cargo-zigbuild 0.23.4（`source /opt/open-proxy/env.sh`）；`nftables` 包（服务没启用）；客户端 sing-box 1.14.1、mihomo v1.19.31
+- 仓库公开后 VPS 用 HTTPS 拉取，GitHub 上的 Deploy Key 已全部删除（2026-09-29）
 - 这台 Windows 开发电脑的 SSH 别名是 `testvps`，文档里的 `op-test` 要各开发电脑自己配
 
 ## 待管理员决定或提供
 
-- GitHub 上重装前的旧 Deploy Key 删不删；SSH 仍允许 root 用密码登录
+- SSH 仍允许 root 用密码登录
 - 测 ACME 用的域名和 Cloudflare API Token
 - 发布前在仓库配 Secret `AGENT_SIGNING_KEY`、Variable `AGENT_SIGNING_PUBKEY`（见 panel 分支 `master/deploy/README.md`）

@@ -58,8 +58,8 @@ Host op-test
 4. 工具链：`apt-get install git`。Go 从 go.dev 下载和开发机同版本的 `linux-amd64` 包，按 go.dev 下载列表（`https://go.dev/dl/?mode=json&include=all`）里的 SHA-256 校验后，解压到 `toolchains/go<版本>/`（现在是 go1.26.5）。Rust 和 Node 等测试需要时再装到 `toolchains/`
    编译环境（2026-09-27 补装）：`apt-get install build-essential`（sqlite、ring 里有 C 代码）；rustup-init 按官方 `.sha256` 校验后装 Rust 1.96.0（`RUSTUP_HOME=toolchains/rustup`、`CARGO_HOME=cache/cargo`）；Node v24.14.1 按 `SHASUMS256.txt` 校验后装到 `toolchains/node-v24.14.1/`，再 `npm install -g pnpm@10`；这些环境变量都写在 `/opt/open-proxy/env.sh`
    测试用（2026-09-27 补装）：`apt-get install nftables`，只用 `nft` 命令读规则，服务没有启用（agent 分支 R20260927-agent-03）；发布用的交叉编译：zig 0.16.0 按 ziglang.org 的 `index.json` 校验后装到 `toolchains/zig-0.16.0/`，`cargo install --locked cargo-zigbuild@0.23.4`，`rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl`（panel 分支 R20260927-panel-04）；客户端 sing-box 1.14.1、mihomo v1.19.31 的官方发布包放在 `tools/`
-5. 仓库访问：VPS 上生成 `/root/.ssh/open-proxy-deploy` 密钥，公钥作为**只读** Deploy Key 加到 GitHub 仓库；`/root/.ssh/config` 里配 `Host github-open-proxy`；GitHub 的主机公钥从 `gh api meta` 取，写进 VPS 的 `known_hosts`
-6. 拉代码：`git clone github-open-proxy:yuuuki-creation/open-proxy.git /opt/open-proxy/src/repo`，再建两个 worktree：`git worktree add /opt/open-proxy/src/<分支> origin/<分支> --detach`
+5. 仓库访问：仓库是公开的，VPS 用 HTTPS 只读拉取，不需要 Deploy Key 和 SSH 别名（2026-09-29 起）
+6. 拉代码：`git clone https://github.com/yuuuki-creation/open-proxy.git /opt/open-proxy/src/repo`，再建两个 worktree：`git worktree add /opt/open-proxy/src/<分支> origin/<分支> --detach`
 
 ## 目录
 
