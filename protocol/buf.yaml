@@ -1,0 +1,9 @@
+# 通信协议的 buf 配置：这个目录就是模块根，包 openproxy.agent.v1 对应 openproxy/agent/v1/。
+# 检查在指向 main 的 PR 上自动跑，见 .github/workflows/protocol.yml。
+version: v2
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - WIRE_JSON
