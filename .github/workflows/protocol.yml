@@ -1,0 +1,37 @@
+# 通信协议检查：只在指向 main、改到 protocol/ 的 PR 上跑。
+# 这个文件属于 main，会随合并出现在 panel、agent 上，但只对指向 main 的 PR 生效。
+name: protocol
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "protocol/**"
+      - ".github/workflows/protocol.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  buf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+
+      - name: buf lint
+        run: buf lint protocol
+
+      - name: buf breaking（和 main 上的版本比较）
+        run: |
+          git worktree add ../base "${{ github.event.pull_request.base.sha }}"
+          if [ -f ../base/protocol/buf.yaml ]; then
+            buf breaking protocol --against ../base/protocol
+          else
+            echo "main 上还没有 protocol/，跳过兼容检查"
+          fi

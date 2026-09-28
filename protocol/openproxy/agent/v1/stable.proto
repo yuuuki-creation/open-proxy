@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+// 稳定消息：主控和 Agent 版本不一致时，仍然要能互相听懂。
+// 规则：字段只加不改，不改含义；删字段要 reserved。
+// 见 docs/design-docs/protocol.md「兼容规则」。
+package openproxy.agent.v1;
+
+// Agent 连上后发的第一条消息（请求，主控回 HelloResult）。
+message Hello {
+  // 安装时写进配置的 Token，主控比对哈希。打日志时要隐去。
+  string token = 1;
+  // Agent 版本，例如 "0.1.0"。和主控版本一致才同步期望状态。
+  string agent_version = 2;
+  Arch arch = 3;
+  // Agent 进程每次启动随机生成；流量上报也带它，主控据此识别 Agent 重启。
+  uint64 instance_id = 4;
+  // 本地已应用的期望状态版本；没有本地状态时为 0。
+  uint64 state_version = 5;
+  // 上次升级失败、换回旧版本时，填当时要升级到的版本；否则为空。
+  string rolled_back_from = 6;
+}
+
+// CPU 架构，主控据此选择升级用的二进制。
+enum Arch {
+  ARCH_UNSPECIFIED = 0;
+  ARCH_AMD64 = 1;
+  ARCH_ARM64 = 2;
+}
+
+// 主控对 Hello 的回复。
+message HelloResult {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_OK = 1;
+    // Token 不存在或不匹配：Agent 长退避后重试，不卸载。
+    STATUS_INVALID_TOKEN = 2;
+    // 这台服务器已经有一个在线连接：Agent 普通退避后重试。
+    STATUS_DUPLICATE_CONNECTION = 3;
+    // 服务器已在面板上删除：Agent 卸载自己。
+    STATUS_SERVER_DELETED = 4;
+  }
+
+  Status status = 1;
+  // 主控版本。
+  string master_version = 2;
+  // 版本一致，开始同步期望状态；为 false 时只收发稳定消息。
+  bool sync = 3;
+}
+
+// 主控让 Agent 升级（请求，Agent 回 UpgradeResult）。
+message Upgrade {
+  string version = 1;
+  // 下载路径，例如 "/api/agent/binary/0.2.0/amd64"。Agent 用自己配置的主控地址拼成完整 URL；
+  // 只给路径，Token 就不会被发到别的地址。
+  string download_path = 2;
+  // 二进制文件的 SHA-256。
+  bytes sha256 = 3;
+  // 对二进制文件内容的 Ed25519 分离签名，Agent 用内置公钥验证。
+  bytes signature = 4;
+}
+
+// Agent 对 Upgrade 的回复。成功后 Agent 补发一次流量上报再退出，由 systemd 拉起新版本。
+message UpgradeResult {
+  bool ok = 1;
+  // 失败原因；成功时为空。
+  string error = 2;
+}
+
+// 主控让 Agent 卸载自己（请求，Agent 回 UninstallResult），删除服务器时发。
+message Uninstall {}
+
+// Agent 对 Uninstall 的回复。回复后补发一次流量上报，再停掉入站、清理防火墙规则、删除自己。
+message UninstallResult {
+  bool ok = 1;
+  // 失败原因；成功时为空。
+  string error = 2;
+}
+
+// 流量上报（推送，每 10 秒一次）。
+message TrafficReport {
+  // 和 Hello 里的 instance_id 相同。
+  uint64 instance_id = 1;
+  // 按「节点 × 用户」的累计流量，只含非零的行。
+  repeated UserTraffic users = 2;
+  // 服务器网卡的累计流量。
+  NetworkTraffic network = 3;
+}
+
+// 一个用户在一个节点上的累计流量，从 Agent 进程启动时算起。
+message UserTraffic {
+  uint64 node_id = 1;
+  uint64 user_id = 2;
+  // 客户端发上来的字节数。
+  uint64 uplink = 3;
+  // 发回客户端的字节数。
+  uint64 downlink = 4;
+}
+
+// 默认路由所在网卡的累计收发，读自 /proc/net/dev。主控用相邻两次的差算网速和整机流量。
+message NetworkTraffic {
+  // /proc/sys/kernel/random/boot_id；变了说明服务器重启过，计数归零。
+  string boot_id = 1;
+  // 网卡名，例如 "eth0"。
+  string interface = 2;
+  uint64 rx_bytes = 3;
+  uint64 tx_bytes = 4;
+}
+
+// 请求处理不了时的回复，两个方向都用。
+message ErrorReply {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    // 认识这个请求，但当前不能处理，例如版本不一致时收到非稳定的请求。
+    // 完全不认识的消息解析后 body 为空，接收方分不清是请求还是推送，只能忽略，请求方靠超时发现。
+    CODE_UNSUPPORTED = 1;
+    // 认识，但处理失败。
+    CODE_FAILED = 2;
+  }
+
+  Code code = 1;
+  // 给人看的说明。
+  string message = 2;
+}

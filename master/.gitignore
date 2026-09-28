@@ -1,0 +1,4 @@
+target/
+# 发布时放进来嵌入主控的 Agent 二进制（P6 / P9）
+agent-dist/*
+!agent-dist/.gitkeep

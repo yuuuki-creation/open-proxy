@@ -1,0 +1,4 @@
+# 固定 Rust 版本（docs/code-style.md「主控后端」），CI 和测试 VPS 都按它安装
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

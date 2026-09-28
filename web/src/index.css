@@ -1,0 +1,20 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
+/* 只做中文界面：系统无衬线字体，中文回退到苹方 / 微软雅黑 */
+body {
+  font-family:
+    system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    sans-serif;
+  background: var(--background);
+}
+
+/* 节点表格拖拽排序：被拖动的行变淡，放下的位置显示一条线 */
+tr[data-dragging] {
+  opacity: 0.5;
+}
+
+tr.react-aria-DropIndicator[data-drop-target] {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}

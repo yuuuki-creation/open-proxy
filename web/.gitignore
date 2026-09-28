@@ -1,0 +1,4 @@
+node_modules/
+# 构建产物：主控编译时用 rust-embed 嵌入（master/src/web.rs），不提交
+dist/
+*.local
