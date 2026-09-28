@@ -1,0 +1,59 @@
+# Agent 的编译和静态检查：只在指向 agent、改到 Agent 相关文件的 PR 上跑。
+# 这个文件属于 agent 分支；检查项见 main 分支的 docs/code-style.md「CI 检查」。
+name: agent
+
+on:
+  pull_request:
+    branches: [agent]
+    paths:
+      - "agent/**"
+      - "protocol/**"
+      - ".github/workflows/agent.yml"
+
+permissions:
+  contents: read
+
+env:
+  TAGS: with_quic,with_utls
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: 1.73.0
+          setup_only: true
+
+      - name: 生成的 protobuf 代码是否最新
+        run: |
+          buf generate
+          git status --porcelain -- internal/pb
+          test -z "$(git status --porcelain -- internal/pb)"
+
+      - name: gofmt
+        run: |
+          gofmt -l .
+          test -z "$(gofmt -l .)"
+
+      - name: go vet
+        run: go vet -tags "$TAGS" ./...
+
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest -tags "$TAGS" ./...
+
+      - name: 编译 linux amd64 / arm64
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags "$TAGS" -trimpath -o "$RUNNER_TEMP/op-agent-$arch" ./cmd/op-agent
+          done

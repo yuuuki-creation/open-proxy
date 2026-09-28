@@ -1,0 +1,12 @@
+# Claude Code 个人配置
+CLAUDE.local.md
+.claude/settings.local.json
+
+# 环境变量
+.env
+
+# 参考项目的源码，只在本地阅读，不提交
+reference/*/repos/
+
+# 原型本机调试的完整日志和输出（结论写进 docs/debug-runs/）
+prototypes/*/runs/

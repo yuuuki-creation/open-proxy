@@ -1,0 +1,15 @@
+# protobuf 代码生成：在 agent/ 下执行 buf generate。
+# 生成物提交进仓库（internal/pb/），CI 重新生成并比对，确认是最新的。
+# 插件版本和 go.mod 里的 google.golang.org/protobuf 保持一致。
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/yuuuki-creation/open-proxy/agent/internal/pb
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.11
+    out: internal/pb
+    opt: paths=source_relative
+inputs:
+  - directory: ../protocol
