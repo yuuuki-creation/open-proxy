@@ -1,0 +1,192 @@
+syntax = "proto3";
+
+// 版本一致时才用的消息：期望状态、状态上报、REALITY 目标检测与扫描。
+// 可以随版本改动，但要保持线上兼容：不改字段编号和类型，删字段要 reserved。
+// 见 docs/design-docs/protocol.md。
+package openproxy.agent.v1;
+
+// 主控给一台服务器的整份期望状态（推送）。Agent 逐项应用，然后发 StateReport。
+// Agent 把它原样（protobuf 编码）保存在本地，启动时先按它启动。
+message DesiredState {
+  // 单调递增：取「上一个版本 + 1」和当前毫秒时间戳中的大者。
+  uint64 version = 1;
+  // 这台服务器上用得到的用户。
+  repeated User users = 2;
+  repeated Node nodes = 3;
+  repeated Exit exits = 4;
+  // 这台服务器当自建落地机时的 SOCKS5 入站；不当落地机时不设置。
+  Landing landing = 5;
+  // TLS 节点（Hysteria2、AnyTLS）共用的证书；没有 TLS 节点时不设置。
+  Certificate certificate = 6;
+}
+
+// 一个用户的凭据，所有节点通用。
+message User {
+  // 用户 ID；它的十进制字符串就是 sing-box 和 Mieru 里的用户名。
+  uint64 id = 1;
+  // VLESS 用。
+  string uuid = 2;
+  // Hysteria2、AnyTLS、Mieru 用。
+  string password = 3;
+  // Shadowsocks 2022 的用户密钥（base64），长度符合加密方式。
+  string ss_key = 4;
+}
+
+// 一个节点就是一个入站，入站 tag 是 "node-<id>"。
+message Node {
+  uint64 id = 1;
+  uint32 port = 2;
+  // 能用这个节点的用户，引用 DesiredState.users 里的 ID。
+  // 追踪层只放行这里列出的用户：用户被移除后立即断开，不等入站重建。
+  repeated uint64 user_ids = 3;
+  // 流量走哪个落地出口，引用 DesiredState.exits 里的 ID；0 表示直连。
+  uint64 exit_id = 4;
+
+  oneof protocol {
+    VlessReality vless_reality = 10;
+    Hysteria2 hysteria2 = 11;
+    AnyTls anytls = 12;
+    Shadowsocks2022 shadowsocks2022 = 13;
+    Mieru mieru = 14;
+  }
+}
+
+// VLESS + REALITY：传输 TCP，flow 固定为 xtls-rprx-vision。
+message VlessReality {
+  // X25519 私钥，base64 raw url 编码。
+  string private_key = 1;
+  repeated string short_ids = 2;
+  // 伪装目标，同时作为 server_name。
+  string target_host = 3;
+  uint32 target_port = 4;
+}
+
+// Hysteria2：使用 DesiredState.certificate。
+message Hysteria2 {
+  // salamander 混淆密码；为空表示不开混淆。
+  string obfs_password = 1;
+  // 端口跳跃范围，Agent 用 nftables 转发到节点端口；不设置表示不开。
+  PortRange port_hopping = 2;
+}
+
+// 闭区间 [start, end]。
+message PortRange {
+  uint32 start = 1;
+  uint32 end = 2;
+}
+
+// AnyTLS：只用 TLS，使用 DesiredState.certificate。
+message AnyTls {}
+
+// Shadowsocks 2022，多用户。
+message Shadowsocks2022 {
+  // 目前固定为 "2022-blake3-aes-128-gcm"。
+  string method = 1;
+  // 服务端主密钥（base64）。
+  string server_key = 2;
+}
+
+// Mieru：传输 TCP。
+message Mieru {}
+
+// 落地出口：一个 SOCKS5 出站，tag 是 "exit-<id>"。
+message Exit {
+  uint64 id = 1;
+  string host = 2;
+  uint32 port = 3;
+  string username = 4;
+  string password = 5;
+}
+
+// 自建落地机上的 SOCKS5 入站。
+message Landing {
+  uint32 port = 1;
+  string username = 2;
+  string password = 3;
+  // 只放行这些来源 IP（用这台落地的节点服务器）；主控生成状态时把服务器地址解析成 IP。
+  repeated string allowed_source_ips = 4;
+}
+
+// PEM 格式的证书和私钥：有域名的是主控申请的正式证书，没有域名的是主控生成的自签证书。
+message Certificate {
+  // 证书链，服务器证书在前。
+  string cert_pem = 1;
+  string key_pem = 2;
+}
+
+// Agent 应用完一份期望状态后的报告（推送）。连接成功、同步开始时也发一次。
+message StateReport {
+  // 已经处理完的期望状态版本（含失败项），不表示全部成功。
+  uint64 applied_version = 1;
+  // 应用失败的项：这些项保持原样，其他项照常生效。
+  repeated ApplyFailure failures = 2;
+}
+
+// 一项应用失败。
+message ApplyFailure {
+  enum Item {
+    ITEM_UNSPECIFIED = 0;
+    // id 是节点 ID。
+    ITEM_NODE = 1;
+    // id 是出口 ID。
+    ITEM_EXIT = 2;
+    // id 为 0。
+    ITEM_LANDING = 3;
+    // id 为 0。
+    ITEM_CERTIFICATE = 4;
+    // id 是节点 ID。
+    ITEM_PORT_HOPPING = 5;
+  }
+
+  Item item = 1;
+  uint64 id = 2;
+  // 给管理员看的原因，例如「端口 443 被占用」。
+  string reason = 3;
+}
+
+// 检测管理员选中的 REALITY 伪装目标（请求，超时 1 分钟）。
+message CheckRealityTargets {
+  // "host" 或 "host:port"，不写端口时是 443。
+  repeated string targets = 1;
+}
+
+// Agent 对 CheckRealityTargets 的回复。
+message CheckRealityTargetsResult {
+  repeated RealityTargetCheck results = 1;
+}
+
+// 一个目标的检测结果，在节点服务器上测得。
+message RealityTargetCheck {
+  string target = 1;
+  bool tls13 = 2;
+  bool h2 = 3;
+  uint32 latency_ms = 4;
+  bool certificate_valid = 5;
+  // 连不上等错误；为空表示检测完成，看上面几项。
+  string error = 6;
+}
+
+// 在服务器上扫描可用的 REALITY 伪装目标（请求，超时 20 分钟）。慢速、低并发。
+message ScanRealityTargets {
+  // 要扫的网段，例如 "203.0.113.0/24"。
+  string cidr = 1;
+  // 同时扫描的地址数。
+  uint32 concurrency = 2;
+  // 每秒最多发起的连接数。
+  uint32 max_per_second = 3;
+}
+
+// Agent 对 ScanRealityTargets 的回复，扫描结束时一次性返回。整体失败时改回 ErrorReply。
+message ScanRealityTargetsResult {
+  repeated RealityScanCandidate candidates = 1;
+}
+
+// 一个支持 TLS 1.3 和 H2 的候选目标。
+message RealityScanCandidate {
+  string ip = 1;
+  // 证书里的域名。
+  string domain = 2;
+  // 证书签发者。
+  string issuer = 3;
+  uint32 latency_ms = 4;
+}

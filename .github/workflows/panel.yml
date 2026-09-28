@@ -1,0 +1,57 @@
+# 主控和前端的编译和静态检查：只在指向 panel、改到相关文件的 PR 上跑，是合并前的最后一道检查。
+# 开发时的编译和测试在测试 VPS 上做（docs/test-vps.md）。
+# 这个文件属于 panel 分支；检查项见 main 分支的 docs/code-style.md「CI 检查」。
+name: panel
+
+on:
+  pull_request:
+    branches: [panel]
+    paths:
+      - "master/**"
+      - "web/**"
+      - "protocol/**"
+      - ".github/workflows/panel.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  master:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: master
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Rust（版本见 rust-toolchain.toml）
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: master
+
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: 1.73.0
+          setup_only: true
+
+      - name: 生成的 protobuf 代码是否最新
+        run: |
+          buf generate
+          git status --porcelain -- src/pb
+          test -z "$(git status --porcelain -- src/pb)"
+
+      - name: rustfmt
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: 编译
+        run: cargo build --locked --release
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: master/Cargo.toml
+          command: check licenses bans sources

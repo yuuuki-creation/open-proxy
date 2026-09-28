@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+// 两个方向的外壳：WebSocket 的每个二进制帧是一条外壳消息。
+// 外壳属于稳定消息，规则同 stable.proto。
+package openproxy.agent.v1;
+
+import "openproxy/agent/v1/agent.proto";
+import "openproxy/agent/v1/stable.proto";
+
+// Agent 发给主控的消息。
+message AgentMessage {
+  // 发送方自增的消息 ID，从 1 开始；两个方向各自计数。
+  uint64 id = 1;
+  // 回复时填对方那条请求的 id；不是回复填 0。
+  uint64 reply_to = 2;
+
+  // 编号 10–99 给稳定消息，100 起给其他消息。
+  oneof body {
+    Hello hello = 10;
+    UpgradeResult upgrade_result = 11;
+    UninstallResult uninstall_result = 12;
+    TrafficReport traffic_report = 13;
+    ErrorReply error_reply = 14;
+
+    StateReport state_report = 100;
+    CheckRealityTargetsResult check_reality_targets_result = 101;
+    ScanRealityTargetsResult scan_reality_targets_result = 102;
+  }
+}
+
+// 主控发给 Agent 的消息。
+message MasterMessage {
+  // 发送方自增的消息 ID，从 1 开始；两个方向各自计数。
+  uint64 id = 1;
+  // 回复时填对方那条请求的 id；不是回复填 0。
+  uint64 reply_to = 2;
+
+  // 编号 10–99 给稳定消息，100 起给其他消息。
+  oneof body {
+    HelloResult hello_result = 10;
+    Upgrade upgrade = 11;
+    Uninstall uninstall = 12;
+    ErrorReply error_reply = 13;
+
+    DesiredState desired_state = 100;
+    CheckRealityTargets check_reality_targets = 101;
+    ScanRealityTargets scan_reality_targets = 102;
+  }
+}
